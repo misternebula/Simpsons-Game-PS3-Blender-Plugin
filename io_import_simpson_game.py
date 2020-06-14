@@ -1,6 +1,6 @@
 bl_info = {
-    "name": "Simpsons Game Importer Test",
-    "author": "Turk",
+    "name": "The Simpsons Game Mesh Importer",
+    "author": "Turk & Mister_Nebula",
     "version": (1, 0, 0),
     "blender": (2, 80, 0),
     "location": "File > Import-Export",
@@ -46,7 +46,8 @@ class SimpGameImport(bpy.types.Operator, ImportHelper):
         tmpRead = CurFile.read()
         mshBytes = re.compile(b"\x33\xEA\x00\x00....\x2D\x00\x02\x1C",re.DOTALL)
         iter = 0
-        for x in mshBytes.finditer(tmpRead):
+        
+        for x in mshBytes.finditer(tmpRead): # Files can have multiple mesh containers
             CurFile.seek(x.end()+4)
             FaceDataOff = int.from_bytes(CurFile.read(4),byteorder='little')
             MeshDataSize = int.from_bytes(CurFile.read(4),byteorder='little')
@@ -55,11 +56,14 @@ class SimpGameImport(bpy.types.Operator, ImportHelper):
             mDataTableCount = int.from_bytes(CurFile.read(4),byteorder='big')
             mDataSubCount = int.from_bytes(CurFile.read(4),byteorder='big')
             mDataOffsets = []
+
+            # This section isn't used right now... probably not needed
             for i in range(mDataTableCount):
                 CurFile.seek(4,1)
-                mDataOffsets.append(int.from_bytes(CurFile.read(4),byteorder='big'))
+                mDataOffsets.append(int.from_bytes(CurFile.read(4),byteorder='big'))         
             mDataSubStart = CurFile.tell()
-            for i in range(mDataSubCount):#mDataSubCount
+            
+            for i in range(mDataSubCount):# Containers can have multiple sub-meshes
                 CurFile.seek(mDataSubStart+i*0xc+8)
                 offset = int.from_bytes(CurFile.read(4),byteorder='big')
                 chunkHead = CurFile.seek(offset+MeshChunkStart+0xC)
@@ -94,13 +98,21 @@ class SimpGameImport(bpy.types.Operator, ImportHelper):
                 
                 VertTable = []
                 UVTable = []
+                CMTable = []
                 for v in range(VertCount):
                     CurFile.seek(VertexStart+v*VertChunkSize)
                     TempVert = struct.unpack('>fff', CurFile.read(4*3))
                     VertTable.append(TempVert)
-                    CurFile.seek(VertexStart+v*VertChunkSize+VertChunkSize-8)
+
+                    # UV data for the textures
+                    CurFile.seek(VertexStart+v*VertChunkSize+VertChunkSize-16)
                     TempUV = struct.unpack('>ff', CurFile.read(4*2))
                     UVTable.append((TempUV[0],1-TempUV[1]))
+
+                    # Color map data for the palette
+                    CurFile.seek(VertexStart+v*VertChunkSize+VertChunkSize-8)
+                    TempCM = struct.unpack('>ff', CurFile.read(4*2))
+                    CMTable.append((TempCM[0],1-TempCM[1]))
                 
                 
                 #build mesh
@@ -112,6 +124,7 @@ class SimpGameImport(bpy.types.Operator, ImportHelper):
                 obj.select_set(True)
                 mesh = bpy.context.object.data
                 bm = bmesh.new()
+                
                 for v in VertTable:
                     bm.verts.new((v[0],v[1],v[2]))
                 list = [v for v in bm.verts]
@@ -123,12 +136,15 @@ class SimpGameImport(bpy.types.Operator, ImportHelper):
                 bm.to_mesh(mesh)
                 
                 uv_layer = bm.loops.layers.uv.verify()
+                cm_layer = bm.loops.layers.uv.new()
                 for f in bm.faces:
                     f.smooth=True
                     for l in f.loops:
                         luv = l[uv_layer]
+                        lcm = l[cm_layer]
                         try:
                             luv.uv = UVTable[l.vert.index]
+                            lcm.uv = CMTable[l.vert.index]
                         except:
                             continue
                 bm.to_mesh(mesh)
@@ -157,7 +173,7 @@ def utils_set_mode(mode):
         bpy.ops.object.mode_set(mode=mode, toggle=False)
 
 def menu_func_import(self, context):
-    self.layout.operator(SimpGameImport.bl_idname, text="Simpson Game (.rws,dff)")
+    self.layout.operator(SimpGameImport.bl_idname, text="The Simpson Game (.rws,dff)")
         
 def register():
     bpy.utils.register_class(SimpGameImport)
